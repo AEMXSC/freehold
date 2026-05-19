@@ -208,6 +208,23 @@ gory details.
    (Run #001 lost `<span class="accent">`; run #002 lost `<b>`;
    run #004 confirmed `<br>` strips.)
 
+4. **`<img>` URLs in DA cells MUST be absolute.** The EDS Media Bus
+   processes `<img src>` values in DA-source HTML and only handles
+   absolute URLs. Root-relative paths (`/assets/foo.png`) are
+   resolved against the DA content host (`content.da.live`), where
+   the asset isn't found → the pipeline serves
+   `<img src="about:error">` and the browser surfaces an
+   `ERR_UNKNOWN_URL_SCHEME` error. Always emit absolute URLs in DA
+   cell `<img>` values:
+   - Public source page: `https://<source-host>/<path>/image.png`
+   - Vendored same-branch assets: `https://<branch>--<repo>--<owner>.aem.page/assets/...`
+   - DA media: `https://content.da.live/<org>/<repo>/media_<sha>...`
+
+   Note the asymmetry with template/fragment HTML refs, which CAN be
+   root-relative — the browser resolves those against the rendered
+   page host (= code-bus host) so `/assets/...` works there. The DA
+   pipeline is what's stricter, not the browser. (Run #005 discovery.)
+
 ### Slot rules in the template
 
 - Text slot: `<el data-slot="name">default value</el>`. Default is
@@ -326,11 +343,30 @@ animations to settle, then capture. Save each as
 `diff/local-<sectionName>.jpg`.
 
 **Local-only source caveat.** If the source URL is on a private host
-(`localhost`, `127.0.0.1`, intranet IP), production round-trip will
-fail to load assets — the public preview servers can't reach the
-private host. Options: (a) skip prod round-trip, document the gap;
-(b) migrate assets to DA `/media/` (out of current scope); (c) ask
-the user to publicly host the source. Discovered in run #005.
+(`localhost`, `127.0.0.1`, intranet IP), the production preview host
+cannot reach the source's assets. Three options, in order of
+preference based on what's been validated:
+
+1. **Vendor the referenced assets under `/assets/` in the repo**
+   (run #005 path, proven end-to-end). Same paths work locally and
+   on production via code-bus. Same-origin so no CORS issues for
+   fonts. Trade-off is repo size (38 MB / 72 files in run #005).
+   Mechanical steps:
+   - `cp -R <source-assets-dir> ./assets/`
+   - Remove `.DS_Store`s and unreferenced files
+   - Rename any directory containing spaces (AEM CLI 404s on
+     URL-encoded `%20`)
+   - In template/fragments/CSS: rewrite localhost URLs to
+     root-relative `/assets/...`
+   - In DA doc cells: rewrite localhost URLs to ABSOLUTE branch URLs
+     (`https://<branch>--<repo>--<owner>.aem.page/assets/...`) — Media
+     Bus requires absolute (see Generate phase rule #4).
+2. **Migrate assets to DA `/media/`.** Cleaner long-term; requires
+   tooling not yet in scope.
+3. **Skip production round-trip.** Lowest effort; ask the user first
+   rather than deciding unilaterally.
+
+Discovered + validated in run #005.
 
 **Production round-trip:**
 
