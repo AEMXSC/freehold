@@ -391,4 +391,26 @@ Screenshots: `diff/production-stories.jpg`, `diff/production-product-grid.jpg`.
 **Local + production round-trip both verified.** Branch
 `sf-overlay-exp-005` deployed to
 `https://sf-overlay-exp-005--snowflake--aemcoder.aem.page/sf-overlay-exp-005/home`.
-Awaiting user direction to close.
+
+## Phase: Close (2026-05-19)
+
+Iteration closed by explicit user request after:
+  - Local round-trip verified (0 console errors, all 8 sections
+    rendering with DA-authored content).
+  - Production round-trip verified end-to-end (overlay applied,
+    Media-Bus optimised images, Adobe Clean fonts loaded, 0 console
+    errors).
+  - 38 MB of source assets vendored to `/assets/` and serving via
+    code-bus on both localhost and production.
+  - 7 cross-project learnings promoted to `experiments/knowledge/learnings.md`.
+  - 2 methodology updates landed:
+    - Container-vs-children slot rule + non-`<section>` block
+      rewrite (Generate phase).
+    - Media-Bus absolute-URL rule for DA cell `<img>` (Generate
+      phase) + the vendor-`/assets/`-in-repo path for local-only
+      sources (Round-trip phase).
+  - 1 user-feedback memory added
+    (`user_prefers_not_unilaterally_narrowing_scope.md`).
+
+Branch `sf-overlay-exp-005` frozen at this commit. Tag
+`iter-005-close` to follow.
