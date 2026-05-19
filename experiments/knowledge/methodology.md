@@ -236,6 +236,34 @@ Slot names are kebab-case. Repeating items get indexed names:
 `card-1.title`, `card-2.title`. Names are scoped to their block —
 the same name can repeat across blocks.
 
+### Container-vs-children slot rule (added run #005)
+
+**Never put `[data-slot]` on an element that has nested `[data-slot]`
+children.** The slot writer for every element type overwrites the
+target's `innerHTML` (or replaces it entirely), which destroys
+nested slot markers before they can be processed.
+
+Concretely:
+- A card wraps icon + title + body in `<a class="card-link">`. Either
+  slot the inner three children, OR slot the `<a>` itself — never both.
+- A picture wraps `<img>` plus `<source>` siblings. Slot the
+  `<picture>`, not the inner `<img>`.
+
+Edge case: an `<a data-slot="cta">Learn more <img></a>` (text + a
+decorative icon, NO nested `[data-slot]`) is fine. The icon is lost
+when DA cell value is applied, but that's acceptable for button-style
+CTAs. The trigger is **nested `[data-slot]`**, not "any inner content".
+
+### Rewrite non-`<section>` blocks to `<section>` in the template (added run #005)
+
+If a logical section in the source uses any tag OTHER than `<section>`
+(common for `<div class="hero-…">`, scroll wrappers, etc.), rewrite the
+outermost element to `<section class="originalClassListHere">` in the
+generated template. The CSS continues to work; the engine can now
+match the block by its first class. Keep the inner DOM intact.
+
+This complements the existing rule about synthesizing `<main>`.
+
 ## 4. Wire
 
 Goal: deploy artifacts to the template-keyed paths and verify run #1's
@@ -286,6 +314,23 @@ Capture `document.querySelector('main').outerHTML`. Compare to
 `input/<page>.html` lines for `<main>`. Save both to `diff/` and
 write a per-tag count table + a tag+class sequence diff in
 `diff/README.md`. Take a viewport screenshot.
+
+**Screenshot strategy.** For pages with `position: sticky`,
+scroll-driven JS, or IntersectionObserver `.anim-enter`-style
+animations (run #005 Adobe BizPro Hub), `fullPage: true` screenshots
+are misleading — the snapshot is taken in initial-scroll state where
+sticky elements leave empty space and `.anim-enter` siblings are
+`opacity: 0`. Default to **per-section viewport screenshots**: call
+`section.scrollIntoView({ block: 'start' })`, wait 400-800ms for
+animations to settle, then capture. Save each as
+`diff/local-<sectionName>.jpg`.
+
+**Local-only source caveat.** If the source URL is on a private host
+(`localhost`, `127.0.0.1`, intranet IP), production round-trip will
+fail to load assets — the public preview servers can't reach the
+private host. Options: (a) skip prod round-trip, document the gap;
+(b) migrate assets to DA `/media/` (out of current scope); (c) ask
+the user to publicly host the source. Discovered in run #005.
 
 **Production round-trip:**
 

@@ -1,0 +1,10 @@
+<svg preserveAspectRatio="none" width="100%" height="100%" overflow="visible" style="display: block;" viewBox="0 0 42 42" fill="none" xmlns="http://www.w3.org/2000/svg">
+<foreignObject x="-24" y="-24" width="90" height="90"><div xmlns="http://www.w3.org/1999/xhtml" style="backdrop-filter:blur(12px);clip-path:url(#bgblur_0_5408_3286_clip_path);height:100%;width:100%"></div></foreignObject><g id="Global / Carousel" data-figma-bg-blur-radius="24">
+<path d="M1 21C1 9.95431 9.95431 1 21 1V1C32.0457 1 41 9.95431 41 21V21C41 32.0457 32.0457 41 21 41V41C9.95431 41 1 32.0457 1 21V21Z" fill="var(--fill-0, white)" fill-opacity="0.08"/>
+<path d="M21 0.5C32.3218 0.5 41.5 9.67816 41.5 21C41.5 32.3218 32.3218 41.5 21 41.5C9.67816 41.5 0.5 32.3218 0.5 21C0.5 9.67816 9.67816 0.5 21 0.5Z" stroke="var(--stroke-0, white)" stroke-opacity="0.11"/>
+<path id="Vector" d="M27 21L15 21M21 15L21 27" stroke="var(--stroke-0, white)" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+</g>
+<defs>
+<clipPath id="bgblur_0_5408_3286_clip_path" transform="translate(24 24)"><path d="M1 21C1 9.95431 9.95431 1 21 1V1C32.0457 1 41 9.95431 41 21V21C41 32.0457 32.0457 41 21 41V41C9.95431 41 1 32.0457 1 21V21Z"/>
+</clipPath></defs>
+</svg>

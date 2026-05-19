@@ -18,6 +18,134 @@ verified fact, and link back here.
 
 ---
 
+## 2026-05-19 — Don't put `data-slot` on a container that has nested `data-slot` children
+
+**From run #005** (Heathrow's pillar-cards hinted at this, BizPro Hub's
+product-cards proved it). The slot writer for every element type
+(`<a>`, `<picture>`, default text) ultimately writes to the target
+element's `innerHTML` (or replaces the element entirely). When the
+target has nested `[data-slot]` children, those markers and their
+content are destroyed before they can be processed.
+
+**Specific failure mode observed in run #005.** Subagent slotted the
+wrapping `<a class="explore-card-link-container" data-slot="card-1.link">`
+of a product card AND its inner `<h3 data-slot="card-1.title">`,
+`<p data-slot="card-1.body">`, and `<img data-slot="card-1.icon">`.
+The link writer ran, set `el.innerHTML = "Firefly"` from the DA cell
+value `<a href="#">Firefly</a>`, and obliterated icon + title + body.
+Visible result: 9 product cards reduced to dark labels with no content.
+
+**The rule.** For any element pattern where a container wraps multiple
+authorable children: slot the children individually, leave the container
+static. Conversely, if you want the whole block to be authorable as
+one chunk, don't slot its children. Never both.
+
+**Edge cases.** An `<a data-slot="cta">Learn more <img></a>` (text +
+decorative icon, no nested data-slot) is fine — the icon is lost on
+edit but that's acceptable for buttons. The trigger is **nested
+`[data-slot]`**, not "any inner content".
+
+**Substrate implications.** The engine COULD detect this and warn (or
+skip the outer slot when inner data-slots exist). For now, methodology-
+level rule only. Worth adding to the Generate phase rules.
+
+## 2026-05-19 — Cross-origin `@font-face` requires CORS headers on the font host
+
+**From run #005**. Browsers strictly enforce CORS on `@font-face url(…)`
+requests, unlike `<img>`, `<script src>`, `<source src>`, or CSS
+`url(image.jpg)` references, which all work cross-origin without
+explicit headers.
+
+**Observed in run #005.** Source page self-hosts 18 OTF font files at
+`http://127.0.0.1:8080/.../assets/fonts/...`. Once the converted page
+was loaded from `http://localhost:3000`, every font URL produced:
+
+> Access to font at '…' from origin 'http://localhost:3000' has been
+> blocked by CORS policy: No 'Access-Control-Allow-Origin' header…
+
+**Effect.** Fonts fall back to system-ui. For Adobe Clean / Inter /
+similar mainstream typefaces, visually subtle but noticeable.
+
+**When this hits future runs.** Any source page that self-hosts fonts
+on a different origin from the served EDS page. The source host needs
+`Access-Control-Allow-Origin: *` (or matching) on font responses.
+Other cross-origin resources are not affected.
+
+**Mitigation paths.**
+- (Recommended for one-off conversions) Configure source host CORS.
+- Migrate fonts to the EDS repo's `/fonts/` directory (counts as
+  asset migration — currently out of methodology scope).
+- Replace `@font-face` with a font CDN that does send CORS headers
+  (Adobe Fonts kit, Google Fonts).
+
+## 2026-05-19 — Locally-hosted source pages cannot round-trip to production
+
+**From run #005**. Source URL was `http://127.0.0.1:8080/…` —
+reachable only from the dev machine. After conversion, asset paths
+were absolute pointing back to localhost. Local round-trip worked
+end-to-end. Production round-trip would NOT work: the production
+preview host (`<branch>--<repo>--<owner>.aem.page`) is a public
+server that cannot reach a private localhost address.
+
+**What still works** (in theory, untested for run #005):
+- Push the converted code to a feature branch — Code Sync deploys it.
+- PUT the DA doc — pipeline processes it.
+- Browser loads the production preview URL — overlay engine runs
+  correctly, structure intact.
+- Every image, every font, every external JS lib 404s.
+
+**What this means for methodology.** Three forward paths when the
+user-supplied source URL is local-only:
+1. **Skip production round-trip.** Document the gap, complete local
+   verification only. Caller decides whether to proceed.
+2. **Asset migration to DA `/media/`.** Currently out of scope. Would
+   need a tool to walk the source's asset references, upload each via
+   the DA admin API to `/media/`, and rewrite paths in the converted
+   artifacts. (~60+ assets in run #005, including 18 OTFs.)
+3. **User publishes the source publicly.** GitHub Pages, Netlify drop,
+   even a `ngrok http 8080` for a one-off — anything that gives the
+   production preview host a reachable URL.
+
+For run #005 we chose path #1 (skipped production round-trip).
+Methodology Round-trip section should document this branch.
+
+## 2026-05-19 — Hero (or any logical section) may be a `<div>`, not `<section>` — rewrite to `<section>`
+
+**From run #005**. Source's hero was `<div class="hero-scroll">…</div>`.
+The overlay engine's `applySlotsToTemplate` does
+`templateMain.querySelectorAll('section[class]')` — so a `<div>`-shaped
+hero would never match a block name from the DA doc.
+
+**Generic rule.** In the Generate phase, when a logical section in the
+source uses any tag OTHER than `<section>` (most common: hero divs,
+nav wrappers, footer-like callouts), rewrite the outermost element to
+`<section class="originalClassListHere">`. Keep the inner DOM intact.
+The CSS continues to work because the original classes carry through.
+
+This complements the existing methodology rule about synthesizing
+`<main>` when the source doesn't have one.
+
+## 2026-05-19 — For scroll-animated pages, fullPage screenshots are misleading; capture per-section instead
+
+**From run #005**. Source page uses `position: sticky` hero with
+parallax + IntersectionObserver-driven `.anim-enter` fades. A
+`fullPage: true` Playwright screenshot captures the page at its
+top-of-scroll state — sticky positioning leaves visual gaps, and
+`.anim-enter` elements stay at `opacity: 0` because they were never
+scrolled into view to trigger their observers.
+
+**What worked.** For each section, call
+`element.scrollIntoView({ block: 'start' })` + a 400-800ms settle,
+then take a viewport screenshot. Save under `diff/local-<section>.jpg`.
+
+**Rule of thumb.** If the source page uses `position: sticky`,
+`scroll-driven JS`, `IntersectionObserver`, or any of the well-known
+scroll-animation patterns, default to per-section viewport screenshots
+in the Round-trip phase. The methodology's "viewport screenshot" step
+can stay; just don't trust a single `fullPage: true` capture.
+
+---
+
 ## 2026-05-18 — Source HTML may not have a `<main>` wrapper
 
 (from [003-patagonia-proposed-a](../projects/003-patagonia-proposed-a/))
