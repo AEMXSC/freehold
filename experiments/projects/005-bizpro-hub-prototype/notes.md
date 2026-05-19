@@ -301,7 +301,8 @@ In `learnings.md` in this folder.
 
 ### Open items
 
-- Production round-trip is blocked by the local-only source.
+- ~~Production round-trip is blocked by the local-only source.~~
+  **Resolved by vendoring assets to /assets/ in the repo (see follow-up phase below).**
 - Hero `<video><source>` not authorable (no slot writer for `<video>`).
 - Studio-banner mobile/tablet `<picture>` URLs aren't authorable
   (same URL as desktop is fine for this source, but a different
@@ -311,3 +312,83 @@ In `learnings.md` in this folder.
 - Per-card titles lose `<br>` line breaks when DA-authored (run #004
   finding, observed in tutorial slide headlines + story card titles
   in this run).
+
+## Phase: Follow-up — vendor assets + production round-trip
+
+After the user pushed back on my decision to skip production: vendored
+the source's 72 asset files (38 MB) under `/assets/` in the repo so
+code-bus serves them. Same paths work locally and on production.
+
+Steps:
+1. `cp -R /Users/catalan/repos/ai/acom-snowflake/acom-bespoke-pages/bizpro-hub-prototype/assets ./assets`
+2. Removed 21 unreferenced files (loose SVGs, extra fonts, the already-
+   vendored Lenis bundle, `.DS_Store`s).
+3. Renamed `assets/fonts/Adobe Clean Display/` → `assets/fonts/AdobeCleanDisplay/`
+   because the aem CLI 404s on URL-encoded `%20` in paths.
+4. `sed` pass to rewrite `http://127.0.0.1:8080/acom-bespoke-pages/bizpro-hub-prototype/`
+   → `/` in templates/, fragments/, styles/, output/da/.
+5. Re-built drafts file, re-verified local round-trip — **0 console errors**
+   (CORS-blocked font errors gone, same-origin).
+6. Created branch `sf-overlay-exp-005` from `sf-overlay-exp`.
+7. Committed 108 files (~38 MB), pushed to origin.
+8. PUT updated DA doc to `admin.da.live/source/aemcoder/snowflake/sf-overlay-exp-005/home.html`
+   → HTTP 200.
+9. POST preview on `admin.hlx.page/preview/.../sf-overlay-exp-005/sf-overlay-exp-005/home`
+   → HTTP 200.
+10. Loaded production preview URL in Playwright.
+
+### Bug surfaced + fixed during production round-trip
+
+**Media Bus doesn't resolve root-relative URLs in DA cells.**
+Initial PUT used `<img src="/assets/section-2/card-image-1.png">` in
+DA cells. EDS pipeline served those as `<img src="about:error">` and
+the story-card background-images came out as `url("about:error")`.
+
+Cause: the pipeline's Media Bus only handles ABSOLUTE URLs. Root-
+relative paths are resolved against the DA content host
+(`content.da.live`), where these assets don't exist → fallback to
+`about:error`.
+
+**Fix:** in the DA doc, rewrote all 30 image URLs to absolute branch
+URLs `https://sf-overlay-exp-005--snowflake--aemcoder.aem.page/assets/...`.
+Re-PUT, re-preview. Media Bus then correctly fetched + optimised:
+`<img src="./media_<sha>.png?width=750&format=webply&optimize=medium">`.
+
+This split — root-relative for static template/fragment refs (browser
+resolves), absolute for DA cell refs (Media Bus needs absolute) — is
+a new methodology rule. Promoted to global learnings.
+
+### Production round-trip verified
+
+- `main.dataset.overlay === "bizpro-hub"` ✓
+- 8 sections present (all unique-first-class) ✓
+- 9 product cards rendering with icons, titles, bodies ✓
+- 4 story-card photos rendering via Media Bus optimised paths ✓
+- Adobe Clean / Adobe Clean Display fonts loading from /assets/fonts/ ✓
+- Hero video URL absolute to branch host ✓
+- 0 console errors ✓
+
+Screenshots: `diff/production-stories.jpg`, `diff/production-product-grid.jpg`.
+
+### Cross-project learnings promoted (additions from follow-up)
+
+1. **Vendoring `/assets/` in the repo is a viable option for
+   locally-hosted source pages.** Same paths work locally and on
+   production via code-bus. Trade-off: binary assets in git
+   (~38 MB for this run). Acceptable for one-off bespoke prototypes;
+   long-term production pages should prefer DA media.
+2. **Media Bus needs absolute URLs in DA cells.** Root-relative
+   (`/assets/...`) gets rewritten to `about:error` because Media Bus
+   resolves against the DA content host. Use absolute URLs in DA
+   cells; static template/fragment refs can stay root-relative
+   (browser resolves them against the page host = code-bus host).
+3. **AEM CLI dev server 404s on URL-encoded `%20` in paths.** Avoid
+   spaces in vendored asset directory names; rename to
+   PascalCase / kebab-case before committing.
+
+### Status
+
+**Local + production round-trip both verified.** Branch
+`sf-overlay-exp-005` deployed to
+`https://sf-overlay-exp-005--snowflake--aemcoder.aem.page/sf-overlay-exp-005/home`.
+Awaiting user direction to close.

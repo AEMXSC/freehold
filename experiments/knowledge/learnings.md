@@ -78,30 +78,117 @@ Other cross-origin resources are not affected.
 - Replace `@font-face` with a font CDN that does send CORS headers
   (Adobe Fonts kit, Google Fonts).
 
-## 2026-05-19 — Locally-hosted source pages cannot round-trip to production
+## 2026-05-19 — Media Bus needs ABSOLUTE URLs in DA cells (root-relative produces `about:error`)
+
+**From run #005 production round-trip**. EDS Media Bus, which
+optimises `<img>` URLs in DA-source HTML, only handles **absolute
+URLs**. Root-relative paths (`/assets/section-2/card-image-1.png`)
+are resolved against the DA content host (`content.da.live`) where
+those paths don't exist — the pipeline serves them as
+`<img src="about:error">` and the browser surfaces a console
+`ERR_UNKNOWN_URL_SCHEME` error.
+
+**Observed symptom in run #005.** First production push had DA cell
+values like `<img src="/assets/section-2/card-image-1.png">`. The
+pipeline rewrote each one to `<img src="about:error">`. Story-card
+backgrounds (background-image slot writer) ended up with
+`style="background-image: url('about:error')"` and the cards rendered
+as black tiles. 2 console errors per page-load (`net::ERR_UNKNOWN_URL_SCHEME`).
+
+**Fix.** Use absolute URLs in DA cells. For run #005 the assets are
+vendored on the same branch, so `https://<branch>--<repo>--<owner>.aem.page/assets/...`
+works. After re-PUT, Media Bus correctly fetched + optimised:
+`./media_<sha>.png?width=750&format=webply&optimize=medium`.
+
+**The asymmetry that's easy to miss.**
+- Template/fragment HTML refs to `/assets/...` — the BROWSER resolves
+  these against the rendered page host, which is the code-bus host.
+  Code-bus serves `/assets/`. Works fine.
+- DA cell `<img src=...>` refs — the EDS PIPELINE (Media Bus) resolves
+  these. Media Bus resolves against the DA content host. Doesn't work
+  unless the URL is absolute to a publicly reachable image source.
+
+**Generic rule for DA cells with images.** Always use absolute URLs.
+Common shapes that work:
+- Vendored same-branch: `https://<branch>--<repo>--<owner>.aem.page/assets/...`
+- Public source (github.io, etc.): `https://<source-host>/assets/...`
+- DA media: `https://content.da.live/<org>/<repo>/media_<sha>...`
+
+## 2026-05-19 — Vendoring `/assets/` in the repo is a viable option for locally-hosted source pages
+
+**From run #005 follow-up**. When the source URL is private/local-only,
+the cleanest alternative to "skip production" is to copy the source's
+asset tree (or just the referenced subset) into `/assets/` at the
+repo root. Code-bus serves them at the same paths the source used,
+so:
+
+- Template and fragment HTML keep relative paths working (browser
+  resolves against the rendered page host = code-bus).
+- CSS `url(…)` refs (e.g. `@font-face`) keep working same-origin.
+- Same-origin means no CORS issues for fonts.
+- DA cell image refs still need to be absolute URLs (see the
+  Media-Bus learning above).
+
+**Trade-offs.**
+- Binary assets in git — discouraged by EDS guidance for production
+  sites because they bloat the repo + slow code-bus pulls. For run
+  #005, 38 MB / 72 files added; repo grew 62→100 MB. Acceptable for
+  a one-off bespoke prototype.
+- DA media migration would be the cleaner long-term path but requires
+  upload tooling not currently in scope.
+
+**Steps that worked for run #005.**
+1. `cp -R <source-assets-dir> ./assets/`
+2. Remove `.DS_Store`s and unreferenced files
+3. Rename any directory with spaces in the name (AEM CLI 404s on
+   URL-encoded `%20`)
+4. `sed` pass to rewrite localhost URLs to root-relative `/assets/...`
+   in template/fragments/CSS/DA-output files
+5. For the DA doc specifically, also rewrite to ABSOLUTE branch URLs
+   (Media Bus requires absolute)
+
+## 2026-05-19 — AEM CLI dev server 404s on URL-encoded `%20` (spaces in paths)
+
+**From run #005**. The source page's font directory was literally
+`Adobe Clean Display` (with spaces). Browsers URL-encode to
+`Adobe%20Clean%20Display`. The aem CLI's static-file middleware
+returned 404 for the encoded form even though the file existed at
+the decoded path on disk.
+
+**Fix.** Rename directories to remove spaces before committing.
+For run #005: `Adobe Clean Display` → `AdobeCleanDisplay`, and
+update CSS `url(…)` refs to match.
+
+**Generic rule.** Vendored asset directories should not contain
+spaces. Replace with PascalCase (`AdobeCleanDisplay`) or kebab-case
+(`adobe-clean-display`).
+
+## 2026-05-19 — Locally-hosted source pages: production round-trip needs an asset story
 
 **From run #005**. Source URL was `http://127.0.0.1:8080/…` —
-reachable only from the dev machine. After conversion, asset paths
-were absolute pointing back to localhost. Local round-trip worked
-end-to-end. Production round-trip would NOT work: the production
-preview host (`<branch>--<repo>--<owner>.aem.page`) is a public
-server that cannot reach a private localhost address.
+reachable only from the dev machine. Initial conversion rewrote asset
+paths to absolute localhost URLs, which works locally but breaks on
+production (the public preview host can't reach private addresses).
 
-**What still works** (in theory, untested for run #005):
-- Push the converted code to a feature branch — Code Sync deploys it.
-- PUT the DA doc — pipeline processes it.
-- Browser loads the production preview URL — overlay engine runs
-  correctly, structure intact.
-- Every image, every font, every external JS lib 404s.
+**Three forward paths** when the source URL is local-only:
 
-**What this means for methodology.** Three forward paths when the
-user-supplied source URL is local-only:
 1. **Skip production round-trip.** Document the gap, complete local
-   verification only. Caller decides whether to proceed.
-2. **Asset migration to DA `/media/`.** Currently out of scope. Would
-   need a tool to walk the source's asset references, upload each via
-   the DA admin API to `/media/`, and rewrite paths in the converted
-   artifacts. (~60+ assets in run #005, including 18 OTFs.)
+   verification only. Lowest effort; least value.
+2. **Vendor assets in the repo at `/assets/`.** Run #005 took this
+   path successfully. Same paths work locally and on production via
+   code-bus. Caveat: binary assets in git (38 MB / 72 files added in
+   run #005). Acceptable for one-off bespoke prototypes. Methodology
+   detail: DA cell image refs still need absolute URLs (see the
+   Media Bus learning above).
+3. **Asset migration to DA `/media/`.** Cleaner long-term. Would
+   need a tool to walk asset references, upload via DA admin API to
+   `/media/`, rewrite paths in DA cells. Currently out of scope.
+
+**Don't default to path #1 without asking.** Skipping prod round-
+trip on the agent's own initiative was a mistake on run #005 — the
+user wanted to know how far the chain works. Path #2 turned out to
+be ~30 minutes of mechanical work and gave a fully working production
+deploy.
 3. **User publishes the source publicly.** GitHub Pages, Netlify drop,
    even a `ngrok http 8080` for a one-off — anything that gives the
    production preview host a reachable URL.
