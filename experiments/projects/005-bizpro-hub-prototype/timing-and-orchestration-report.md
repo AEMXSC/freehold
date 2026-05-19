@@ -1,122 +1,176 @@
-# Run #005 — Timing & Orchestration Analysis
+# Run #005 — Final Report
 
-Per-phase wall-clock timings for the BizPro Hub conversion, plus
-forward-looking notes on what could parallelize and which model /
-thinking level fits each step. Per the user's brief: analysis only,
-nothing implemented.
+Conversion of Adobe BizPro Hub prototype
+(`http://127.0.0.1:8080/acom-bespoke-pages/bizpro-hub-prototype/`) into
+an EDS overlay page. Covers what shipped, how it went, where it went
+sideways, and the analysis the user asked for up-front: parallelization
+opportunities and best-fit model + thinking level per phase.
 
 ---
 
-## Wall-clock timings (measured)
+## 1. What shipped
+
+**Deployed at** `https://sf-overlay-exp-005--snowflake--aemcoder.aem.page/sf-overlay-exp-005/home`
+on branch `sf-overlay-exp-005` (HEAD `00cf2d4`).
+
+| Artifact | Path | Size |
+|---|---|---|
+| Template | `templates/bizpro-hub.html` | 33.9 KB |
+| Header fragment | `fragments/bizpro-hub/header.html` | 1.3 KB |
+| Footer fragment | `fragments/bizpro-hub/footer.html` | 7.0 KB |
+| Page CSS | `styles/bizpro-hub.css` | 51.6 KB |
+| Lenis CSS (vendored) | `styles/bizpro-hub-lenis.min.css` | 457 B |
+| Animations JS | `scripts/bizpro-hub-animations.js` | 26.3 KB |
+| Lenis JS (vendored) | `scripts/bizpro-hub-lenis.min.js` | 17.4 KB |
+| Source assets (vendored) | `assets/...` | 38 MB / 72 files |
+| DA-source body fragment | `…/sf-overlay-exp-005/home.html` | 15.5 KB |
+
+113 `[data-slot]` markers across 8 content blocks + 1 metadata block.
+9 product cards, 4 story cards, 3 tutorial slides, 3 pricing cards,
+6 acrobat-feature card slots, 1 hero block, 1 banner, 1 search section.
+
+Largest source we've handled: 2687 lines / 120 KB HTML, 1319-line
+inline `<style>`, 520 lines of inline JS, 72 referenced assets including
+18 self-hosted OTF fonts.
+
+**End-to-end verified:** local + production round-trip both green. 0
+console errors on the production preview. Adobe Clean / Adobe Clean
+Display fonts loading. Story photos optimised via Media Bus
+(`./media_<sha>.png?width=750&format=webply&optimize=medium`).
+DA-authored content flowing through the overlay engine cleanly.
+
+## 2. Wall-clock timings
 
 ```
-phase          duration    min:sec  notes
-─────────      ──────────  ───────  ────────────────────────────
-capture        118s          1m58s  curl + asset probe + folder init
-analyze        215s          3m35s  structural map + decisions write-up
-generate       639s         10m39s  subagent (general-purpose)
-wire            28s          0m28s  cp + transform + lint
-roundtrip      447s          7m27s  dev server + Playwright + bug fix
-                                    (~150s of the 447s was the
-                                     wrap-link bug investigation + fix)
-reflect        325s          5m25s  notes + learnings + this report
-─────────      ──────────  ───────
-sum            1772s        29m32s  measured phase time
+phase             duration    min:sec  notes
+─────────         ──────────  ───────  ────────────────────────────
+capture            118s         1m58s  curl + asset probe + folder init
+analyze            215s         3m35s  structural map + decisions write-up
+generate           639s        10m39s  single subagent (general-purpose)
+wire                28s         0m28s  cp + transform + lint
+roundtrip-local    447s         7m27s  dev server + Playwright + slot-bug fix
+                                       (~150s of the 447s was bug triage)
+reflect-1          325s         5m25s  notes + global learnings + report v1
+─────────         ──────────  ───────
+                  1772s        29m32s  agent-active time for initial run
+
+USER REVIEW       ~600s        ~10m    "Did you push to DA?" → "What about
+                                       vendoring /assets/ as code?" — user
+                                       caught two unilateral narrowings.
+
+follow-up:
+  vendor + wire    ~900s        ~15m   cp assets, sed rewrites, lint,
+                                       dev server restart, local verify
+  branch + push   ~  60s        ~1m    git checkout, add, commit, push
+  da PUT + prev   ~  10s        ~0.2m  curl, curl
+  prod verify     ~  80s        ~1.3m  Playwright nav, console, evaluate
+  media-bus fix    ~120s        ~2m    diagnose about:error, sed, re-PUT,
+                                       re-preview, re-verify in Playwright
+  docs + audit     ~600s        ~10m   notes update, learnings update,
+                                       memory entry, methodology updates,
+                                       commit, push
+─────────         ──────────  ───────
+follow-up sum     ~1770s        ~29m   roughly same as initial run
+
+GRAND TOTAL       ~3540s + ~600s user = ~70 min wall clock end-to-end
 ```
 
-Between-phase orchestration overhead: 18 + 19 + 32 + 12 = 81s (~1.4m)
-of "main agent setting up the next phase" — small but measurable.
+Reference: run #004 Heathrow (10 KB source) was ~22 min total without
+production-asset issues. Run #005's source was 12× larger AND hit the
+local-only assets problem AND surfaced two new bugs (wrap-link slot,
+Media-Bus URL rule). Worth the 70 min in learning value.
 
-Reference point: run #001 (Stardust Semrush home, much smaller input)
-ran in roughly the same total time; run #004 (Heathrow, 10 KB input)
-ran in less. Source size is NOT linear in wall-clock — the Generate
-phase dominates regardless of input size, because it's almost entirely
-LLM time.
+### Active-time breakdown
 
-## What could be parallelized
+```
+Capture          3.3%
+Analyze          6.0%
+Generate        17.9%  ← largest single phase
+Wire             0.8%
+Round-trip       7.6%  initial local
+Reflect          9.1%
+Follow-up vendor 16.9%
+Follow-up docs   16.9%
+Other            21.5%  including user-review pauses
+                100%
+```
 
-Looking at the phase graph, several opportunities exist. Each is
-described with what would parallelize and what (if anything) would
-need to change to enable it.
+## 3. What could be parallelized
 
-### 1. Capture-phase asset fetches (small win, ~30-60s)
+### 3.1 Capture-phase asset fetches (small win, ~30-60s)
 
-Today: serial `curl` of the main HTML, then individual `curl` of each
+Today: serial `curl` for the main HTML, then individual `curl` per
 external asset.
 
-Could be: fan out all asset URLs from the head's `<link>`s and
-external `<script src>` to parallel curl calls. With ~3 external
-assets (lenis.min.css, lenis.min.js, the main HTML) in this run, the
-savings are small. For sources with many external libs (Stardust
-0.3 used 4-5 CDN links), it grows.
+Could be: fan out all asset URLs to parallel curl calls. With ~3
+external assets in this run the savings are tiny. For sources with
+many CDN-linked libs the win grows.
 
 **No substrate change needed** — just batch the curl invocations.
 
-### 2. Analyze can run partly during Capture (medium win, ~60-120s)
+### 3.2 Analyze can overlap Capture (medium win, ~60-120s)
 
-Today: Capture finishes; then Analyze reads the file.
+Today: Capture finishes, then Analyze reads the file.
 
-Could be: as soon as the main HTML lands, kick off `head`, `grep`,
-and structural map reads in parallel (multi-tool-call batch). The
-asset fetches continue in the background.
-
-**No substrate change needed** — just sequence the tool calls
-differently in the main agent.
-
-### 3. Generate sub-tasks (big win, ~300s+)
-
-Today: ONE subagent does everything — read methodology, read learnings,
-read source, write template, write fragments, write CSS, write
-animations.js, write DA doc.
-
-Could be: **fan out per-block** to multiple subagents in parallel:
-- Subagent A: write `header.html` fragment
-- Subagent B: write `footer.html` fragment
-- Subagent C: write `bizpro-hub.css` from inline `<style>`
-- Subagent D: write `bizpro-hub-animations.js` from inline `<script>`
-- Subagent E: write 8 sections of the template + DA doc
-  (still one agent because slots must be consistent across template
-  and DA, and section names must match)
-
-The biggest unit (Subagent E) is still long, but B/C/D are mechanical
-extractions (~10-30s each) that today run sequentially within the
-single subagent's 10-minute window.
-
-Expected savings: 4-6 minutes off Generate if the 4 mechanical agents
-run in parallel with the template+DA agent.
-
-**No substrate change needed** — the main agent issues 4-5 Agent
-tool calls in one message. Coordination cost: pass a shared "section
-list + slot naming convention" string to all 5 subagents up-front.
-
-### 4. Wire + lint parallelism (tiny win, ~10s)
-
-Today: cp files, then run `npm run lint`.
-
-Could be: cp files, then in parallel run `npm run lint` AND
-`node experiments/knowledge/tools/transform-da-to-eds.mjs …` (the
-draft-builder). Today they're serial; both take ~5s.
+Could be: as soon as the main HTML is on disk, kick off structural
+reads in parallel (one batch of `head`, `grep`, line-count tool
+calls). Asset fetches continue in the background.
 
 **No substrate change needed.**
 
-### 5. Round-trip local + production (medium win when prod runs)
+### 3.3 Generate sub-tasks (BIG win, ~300s+)
 
-Today: local round-trip first, fix any issues, then production.
+Today: ONE subagent does everything — reads methodology, reads
+learnings, reads source, writes template, writes fragments, writes
+CSS, writes animations.js, writes DA doc. 639s serial.
 
-Could be: when local passes its sanity check (overlay applied, sections
-present), kick off the production PUT + POST preview in the background
-while continuing to capture screenshots locally. Both surfaces converge
-on a `playwright.navigate` call when ready.
+Could be: fan out across 4-5 parallel subagents:
+- **A** — `header.html` fragment
+- **B** — `footer.html` fragment
+- **C** — `bizpro-hub.css` from inline `<style>` (mechanical extraction)
+- **D** — `bizpro-hub-animations.js` from inline `<script>` (with the
+  library-loader prelude)
+- **E** — template (with `[data-slot]` markers) + DA doc (block tables,
+  metadata) **together**, because slot names must be consistent across
+  the two files
 
-**No substrate change needed.** Caveat: only meaningful when production
-round-trip is part of the run — for run #005 it was skipped.
+Subagent E is still the long pole (the actual conversion work), but
+A/B/C/D are short mechanical extractions that today wait their turn
+inside the single subagent's 10-min window. Expected savings on
+Generate: 4-6 minutes.
 
-### 6. Memory + learnings update during Reflect (small win)
+**No substrate change needed** — main agent issues 4-5 Agent tool
+calls in a single message. Coordination cost: produce a shared
+"section list + slot naming convention" artifact during Analyze
+that all 5 subagents reference.
 
-Today: Reflect writes notes.md, then learnings.md, then methodology.md
-sequentially.
+### 3.4 Wire + drafts build (tiny win, ~10s)
 
-Could be: 3 separate `Write` tool calls batched into one message.
+Today: cp files, then `npm run lint`, then `transform-da-to-eds.mjs`.
+
+Could be: cp first, then parallel `lint` + `transform`. Both take ~5s.
+
+**No substrate change needed.**
+
+### 3.5 Round-trip local + production (medium win, ~150s when prod runs)
+
+Today: local first, find any bugs, fix, then production.
+
+Could be: as soon as local's structural sanity check passes (overlay
+applied, sections present), kick off git push + DA PUT + admin POST
+preview in the background while continuing to screenshot locally.
+Both surfaces converge when the production Playwright nav happens.
+
+**No substrate change needed.** Only meaningful when production
+round-trip is in scope (which it should be by default — see lessons
+in §5).
+
+### 3.6 Reflect's write-up (small win, ~120s)
+
+Today: notes.md write, then learnings.md write, then methodology.md
+write — serial.
+
+Could be: batch 3 Edit calls in one message.
 
 **No substrate change needed.**
 
@@ -125,108 +179,179 @@ Could be: 3 separate `Write` tool calls batched into one message.
 | Phase | Today | With parallelism | Win |
 |---|---|---|---|
 | Capture | 118s | ~60-90s | 30-60s |
-| Analyze | 215s | overlaps Capture | 60-120s |
+| Analyze | 215s | overlaps with Capture | 60-120s |
 | Generate | 639s | ~300-400s | 240-340s |
 | Wire | 28s | ~20s | 8-10s |
-| Round-trip | 447s | unchanged for local-only | 0-150s if prod runs |
-| Reflect | ~600s | ~480s | 120s |
-| **Total estimate** | **~35m** | **~22-25m** | **~10-13m** |
+| Round-trip | 447s | overlaps push/PUT/preview | 150s+ |
+| Reflect | 325s | ~200s | 120s |
+| **Total estimate (active)** | **~30m** | **~18-22m** | **~10-12m** |
 
-Biggest lever is the Generate phase — single subagent handles too
-much work serially today.
+**Biggest lever:** Generate. Today one subagent does too much serially.
 
----
-
-## Model + thinking-level recommendations (by phase)
+## 4. Best model + thinking level per phase
 
 Default model in this session is Claude Opus 4.7 (1M context). Cost
-and latency matter, especially for the long Generate phase.
+and latency matter — especially for the Generate phase, which today
+dominates token spend.
 
-| Phase | Recommended primary | Thinking | Why |
+| Phase | Recommended | Thinking | Why |
 |---|---|---|---|
-| **Capture** | Haiku 4.5 (parent) | none | Mechanical: curl, save, count lines, grep. No reasoning required. |
-| **Analyze** | Opus 4.7 (parent) | medium ("think") | Structural decisions: which sections, what slots, what to strip, how to disambiguate. Mistakes here cascade through the rest of the run. |
-| **Generate** | Sonnet 4.6 subagents | medium ("think") | Large volume of mechanical-but-structured work: extracting markup, writing slot markers, building the DA doc. Sonnet handles this well at lower cost than Opus; the methodology + learnings give it the rules it needs. Opus only needed if there are tricky judgment calls (e.g., novel slot patterns). |
-| **Wire** | Haiku 4.5 (parent) | none | cp, lint, transform — pure mechanical. |
-| **Round-trip** | Sonnet 4.6 (parent) | low ("think briefly") | Probing rendered DOM, taking screenshots, deciding "this looks right". Bug investigation (when something fails) wants higher reasoning — escalate to Opus only for the diagnosis call, not the routine "passes/fails" verification. |
-| **Reflect** | Opus 4.7 (parent) | medium-high ("think harder") | This is where cross-project learnings get distilled. The decisions about WHAT to promote and HOW to phrase the generic rule outlive the conversation. Worth the model spend. |
+| **Capture** | Haiku 4.5 (parent) | none | curl, save, count lines, grep. Deterministic, no judgment. |
+| **Analyze** | Opus 4.7 (parent) | medium ("think") | Decisions cascade through every later phase. Worth strongest model + thinking budget. |
+| **Generate** | Sonnet 4.6 (subagents) | medium ("think") | High-volume but rule-bound work. Methodology + learnings encode most judgment; subagent applies rules. Opus only when novel patterns appear. |
+| **Wire** | Haiku 4.5 (parent) | none | cp + lint + transform. Pure mechanical. |
+| **Round-trip (green path)** | Sonnet 4.6 (parent) | low ("think briefly") | Probe DOM, screenshot, verify "looks right". Cheap + fast. |
+| **Round-trip (failure triage)** | Opus 4.7 (subagent) | high ("think harder") | When something breaks, deep reasoning pays. Dispatch a focused subagent with the symptom + relevant code snippets. |
+| **Reflect** | Opus 4.7 (parent) | medium-high ("think harder") | Cross-project rules get written here. They outlive the conversation. Worth the spend. |
 
 ### Why "thinking level" matters per phase
 
-- **Capture/Wire** are deterministic — extended thinking buys nothing.
-  Cheap model + no thinking = right answer in seconds.
+- **Capture / Wire** are deterministic — extended thinking buys
+  nothing. Cheap model + no thinking = right answer in seconds.
 
-- **Generate** is high-volume but rule-bound. Methodology +
-  learnings encode most of the judgment. The subagent's job is to
-  apply rules consistently, not invent them. Sonnet + brief thinking
-  produces consistent output; Opus would be slower without better
-  results for this shape of work. Where Opus DOES pay off: novel
-  patterns (a new slot writer, an unusual block shape). When the
-  subagent encounters one, it should escalate.
+- **Generate** is high-volume but rule-bound. Methodology + learnings
+  encode most of the judgment. The subagent's job is to apply rules
+  consistently, not invent them. Sonnet + brief thinking produces
+  consistent output; Opus would be slower without producing measurably
+  better artifacts. Where Opus DOES pay off: novel patterns (a new
+  slot writer case, an unusual block shape). When a subagent
+  encounters something the methodology doesn't cover, it should
+  escalate to the main (Opus) agent rather than improvise.
 
 - **Analyze + Reflect** are where wrong calls have the largest blast
-  radius. Analyze decisions get baked into the converted artifacts;
+  radius. Analyze decisions get baked into the converted artifacts.
   Reflect decisions get baked into methodology that future runs
-  follow. These warrant the strongest model + most thinking budget.
+  follow. Worth strongest model + most thinking.
 
-- **Round-trip** is mixed: routine checks are cheap, but failure
-  diagnosis can be deep. Two-tier: cheap+fast for the green path,
+- **Round-trip** is mixed: routine "is the page rendering" checks are
+  cheap, but failure diagnosis can be deep (see §5.1 below for two
+  concrete examples). Two-tier: cheap+fast for the green path,
   Opus-with-thinking for triage.
 
-### Concrete recommendations for run #006+
+## 5. What went sideways — and what to do about it
+
+Two classes of bug surfaced in run #005, plus one user-feedback
+correction.
+
+### 5.1 Two preventable bugs
+
+**5.1.1 Wrap-link slot bug** (cost: ~150s diagnose + fix in local
+round-trip). The Generate subagent put `[data-slot]` on a wrapping
+`<a>` AND on its inner `<h3>`/`<p>`/`<img>` children. The slot writer
+runs the outer one first, sets `el.innerHTML = newValue` (just the
+text from the DA cell), and obliterates the nested data-slot markers
+before they get processed. 9 product cards rendered as bare labels.
+
+**5.1.2 Media-Bus root-relative bug** (cost: ~120s diagnose + fix in
+production round-trip). DA cell `<img>` values were root-relative
+(`/assets/section-2/card-image-1.png`). EDS pipeline rewrote them all
+to `<img src="about:error">` because Media Bus only resolves absolute
+URLs.
+
+Both are **rule-shaped**, not judgment-shaped. Both can be caught at
+Generate time without an LLM:
+
+**Proposed Generate-phase validator** (~30 LOC of mechanical
+JavaScript) that the main agent runs after subagents finish:
+
+```js
+// For each [data-slot] element in template
+for (const el of template.querySelectorAll('[data-slot]')) {
+  const nested = el.querySelectorAll('[data-slot]');
+  if (nested.length) console.error(
+    `Container ${el.tagName}[data-slot="${el.dataset.slot}"] has `
+    + `${nested.length} nested [data-slot] — slot writer will destroy them`);
+}
+
+// For each <img> in DA doc cells
+for (const img of daDoc.querySelectorAll('div > div > img')) {
+  const src = img.getAttribute('src');
+  if (!/^https?:\/\//.test(src)) console.error(
+    `DA cell img src is not absolute: ${src} — Media Bus needs absolute URLs`);
+}
+```
+
+Either run synchronously from the main agent after subagents complete,
+or build it into a `transform-da-to-eds` lint step. **Recommended for
+run #006** — would have saved ~270s in run #005 and is trivial to
+write.
+
+### 5.2 The unilateral-skip mistake
+
+I decided to skip the production round-trip because the source URL was
+on `127.0.0.1`. Reasoning: "production preview host can't reach
+localhost, assets will all 404, page will be visually broken." That
+reasoning was correct as far as it went — but the **conclusion
+("skip the step")** was wrong:
+
+- Skipping prod missed the Media-Bus URL discovery, which is a
+  generic rule the methodology now encodes.
+- It also missed validating the rest of the chain (DA push, code-bus
+  serving, overlay engine on prod) — all of which work fine
+  independently of where assets live.
+- The "vendor /assets/ in the repo" alternative the user proposed took
+  ~15 min to execute and turned the broken-on-prod scenario into a
+  fully-green end-to-end deploy.
+
+**Lesson written to auto-memory** as
+`user_prefers_not_unilaterally_narrowing_scope.md`: when the agent
+sees a reason to skip / mark blocked / design around, surface the
+call to the user as a question. Don't decide solo.
+
+## 6. Concrete recommendations for run #006+
+
+In order of expected impact:
 
 1. **Multi-subagent Generate.** Split mechanical extractions
-   (header, footer, CSS, animations) from the template+DA agent.
-   4-5 parallel subagents on Sonnet 4.6. Saves ~4-6 minutes.
+   (header/footer/CSS/animations) from the template+DA agent.
+   4-5 parallel Sonnet subagents. Saves ~4-6 minutes. (§3.3)
 
-2. **Cheaper Wire.** Haiku 4.5 for the cp + lint + transform step.
-   Quality requirement is just "files in place, lint passes."
+2. **Generate-phase post-validator.** Catch the wrap-link bug
+   (nested `[data-slot]`) and the Media-Bus bug (non-absolute DA
+   cell `<img>` URLs) before they hit round-trip. Saves ~4-5 minutes
+   of triage. (§5.1)
 
-3. **Spec-mode Analyze.** Have Analyze produce a JSON
-   `decisions.json` artifact that the Generate subagents read.
-   Today the decisions live in markdown prose in `notes.md` which
-   subagents have to re-parse. A structured artifact removes one
-   layer of LLM re-interpretation.
+3. **Production round-trip is the default**, not an option to skip.
+   Methodology and auto-memory both now make this explicit. (§5.2)
 
-4. **Round-trip diagnostic agent.** When a screenshot reveals
-   broken rendering, dispatch a focused subagent (Opus, "think
-   harder") with the specific symptom + relevant template+DA snippets
-   to diagnose. Today the main agent absorbs that work itself.
+4. **Cheaper Wire phase.** Haiku 4.5. Quality bar is just "files in
+   place, lint passes." (§4)
 
-5. **Move boilerplate context to a Skill.** The user's stated
-   end-state is a Claude Code skill, not a CLI. Once we have the
-   skill, common context (methodology rules, slot writer reference,
-   "don't slot nested children" etc.) loads once per invocation
-   instead of every subagent re-reading the same files. Token
-   savings + faster startup.
+5. **Spec-mode Analyze.** Produce a structured `decisions.json` or
+   YAML artifact during Analyze that Generate subagents read directly,
+   instead of re-parsing prose `notes.md`. Reduces LLM
+   re-interpretation. Possibly 20-30% Generate token reduction.
 
----
+6. **Diagnostic subagent for Round-trip failures.** When a screenshot
+   reveals broken rendering, dispatch a focused Opus subagent with the
+   symptom + relevant code snippets, instead of the main agent
+   absorbing the diagnosis itself. (§4 "failure triage" row)
 
-## Notable inefficiencies observed in run #005
+7. **Move boilerplate context to a Claude Code skill.** The user's
+   stated end-state. Once the skill loads methodology/learnings/slot
+   writer reference once per invocation, subagents don't each re-read
+   the same files. Faster startup + lower tokens.
 
-- **Wrap-link bug took ~150s to find and fix.** Three Playwright
-  evaluate calls + one DOM inspection + the sed-based fix + re-test.
-  A guardrail (lint rule? template validator?) that catches
-  "container has nested data-slot children" at Generate time would
-  prevent this class of bug entirely. Worth a small substrate
-  addition for run #006.
+8. **Pre-extract source artifacts during Analyze.** Split the 2687-
+   line source into:
+   - `head-links.txt` — head-level `<link>` tags to lift
+   - `inline-style.css` — extracted inline `<style>` block
+   - `inline-script.js` — extracted inline `<script>` blocks
+   - `body-sections.html` — just the `<body>` content
+   - `assets.json` — list of all referenced asset URLs
 
-- **Reading the full source (2687 lines, 120 KB) into the Analyze
-  phase.** The subagent for Generate ALSO has to read it. Could
-  pre-extract:
-  - `head-links.txt` (just the head `<link>`s the template needs to lift)
-  - `inline-style.css` (just the `<style>` block extracted)
-  - `inline-script.js` (just the `<script>` blocks extracted)
-  - `body-sections.html` (just `<body>` content)
-  - `assets.json` (list of all asset URLs)
+   Each Generate subagent reads only what it needs. ~30-50% Generate
+   token reduction.
 
-  Each subagent then reads only what it needs. Reduces token use in
-  Generate by maybe 30-50%.
+## 7. Net assessment
 
-- **Three "task reminder" system messages during this run** —
-  triggered when more than ~6-8 tool calls happen without a
-  TaskUpdate. The reminder cycle is fine in principle but the
-  cadence felt high. Could be tuned, OR the agent should
-  proactively call TaskList+TaskUpdate at every phase boundary
-  (which would also make this report easier to generate from
-  task metadata rather than wall-clock).
+Run #005 was the project's most demanding source to date and produced
+the highest yield in cross-project learnings (5 new entries in global
+learnings, 2 substrate-relevant validators identified, 1 user-feedback
+memory). Local + production round-trip both green; DA editing flowing.
+
+Total active agent time: ~60 min (initial 30 + follow-up 30).
+Equivalent run #006 with the recommendations above could land in
+~25-30 minutes including production round-trip.
+
+Branch awaits user direction to close.
