@@ -1,0 +1,122 @@
+.pipeline-progress {
+  max-width: 480px;
+  margin: 80px auto;
+  padding: 0 24px;
+}
+
+.pipeline-progress__headline {
+  font-size: 1.25rem;
+  font-weight: 600;
+  color: #292929;
+  text-align: center;
+  margin: 0 0 8px;
+}
+
+.pipeline-progress__subtext {
+  font-size: 0.875rem;
+  color: #6e6e6e;
+  text-align: center;
+  margin: 0 0 32px;
+}
+
+.pipeline-progress__bar-track {
+  height: 6px;
+  background: #e0e0e0;
+  border-radius: 3px;
+  overflow: hidden;
+  margin-bottom: 32px;
+}
+
+.pipeline-progress__bar-fill {
+  height: 100%;
+  background: #2680eb;
+  border-radius: 3px;
+  transition: width 0.6s ease;
+  width: 0%;
+}
+
+.pipeline-progress__steps {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.pipeline-progress__step {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.pipeline-progress__indicator {
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  background: #e0e0e0;
+  color: #868686;
+  font-size: 0.7rem;
+  font-weight: 700;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  transition: background 0.2s, color 0.2s;
+}
+
+.pipeline-progress__indicator--done {
+  background: #12805c;
+  color: #fff;
+}
+
+.pipeline-progress__indicator--active {
+  background: #2680eb;
+  color: #fff;
+}
+
+.pipeline-progress__label {
+  font-size: 0.875rem;
+  color: #868686;
+  flex: 1;
+}
+
+.pipeline-progress__label--done {
+  color: #b0b0b0;
+  text-decoration: line-through;
+}
+
+.pipeline-progress__label--active {
+  color: #292929;
+  font-weight: 500;
+}
+
+.pipeline-progress__step-spin {
+  display: inline-block;
+  width: 12px;
+  height: 12px;
+  border: 2px solid #cacaca;
+  border-top-color: #2680eb;
+  border-radius: 50%;
+  animation: geo-spin 0.7s linear infinite;
+  flex-shrink: 0;
+}
+
+@keyframes geo-spin {
+  to { transform: rotate(360deg); }
+}
+
+.pipeline-progress__error {
+  margin-top: 24px;
+  font-size: 0.875rem;
+  color: #d7373f;
+  text-align: center;
+}
+
+.pipeline-progress__error + a {
+  display: block;
+  margin-top: 12px;
+  text-align: center;
+  font-size: 0.875rem;
+  color: #2680eb;
+}

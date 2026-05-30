@@ -1,0 +1,153 @@
+.variant-picker {
+  padding: 24px;
+}
+
+.variant-picker__loading,
+.variant-picker__error {
+  text-align: center;
+  padding: 48px 0;
+  font-size: 0.875rem;
+  color: #6e6e6e;
+}
+
+.variant-picker__error {
+  color: #d7373f;
+}
+
+.variant-picker__error + a {
+  display: block;
+  text-align: center;
+  margin-top: 12px;
+  font-size: 0.875rem;
+  color: #2680eb;
+}
+
+.variant-picker__header {
+  text-align: center;
+  margin-bottom: 32px;
+}
+
+.variant-picker__headline {
+  font-size: 1.75rem;
+  font-weight: 700;
+  color: #292929;
+  margin: 0 0 8px;
+}
+
+.variant-picker__subtext {
+  font-size: 0.875rem;
+  color: #6e6e6e;
+  margin: 0;
+}
+
+.variant-picker__grid {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 24px;
+}
+
+@media (min-width: 768px) {
+  .variant-picker__grid {
+    grid-template-columns: repeat(3, 1fr);
+  }
+}
+
+.variant-picker__card {
+  border: 2px solid #e0e0e0;
+  border-radius: 8px;
+  overflow: hidden;
+  cursor: pointer;
+  transition: border-color 0.15s, box-shadow 0.15s;
+  background: #fff;
+  display: flex;
+  flex-direction: column;
+}
+
+.variant-picker__card:hover {
+  border-color: #b0b0b0;
+}
+
+.variant-picker__card:focus {
+  outline: 2px solid #2680eb;
+  outline-offset: 2px;
+}
+
+.variant-picker__card--selected {
+  border-color: #2680eb;
+  box-shadow: 0 4px 16px rgba(38 128 235 / 0.15);
+}
+
+.variant-picker__preview {
+  background: #f5f5f5;
+  height: 240px;
+  overflow: hidden;
+  position: relative;
+}
+
+.variant-picker__preview iframe {
+  width: 200%;
+  height: 200%;
+  border: none;
+  transform: scale(0.5);
+  transform-origin: top left;
+  pointer-events: none;
+}
+
+.variant-picker__body {
+  padding: 16px;
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.variant-picker__tag {
+  font-size: 0.7rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: #868686;
+}
+
+.variant-picker__name {
+  font-size: 1rem;
+  font-weight: 600;
+  color: #292929;
+  margin: 0;
+}
+
+.variant-picker__palette {
+  display: flex;
+  gap: 4px;
+}
+
+.variant-picker__chip {
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  border: 1.5px solid rgba(0 0 0 / 0.1);
+  display: inline-block;
+  flex-shrink: 0;
+}
+
+.variant-picker__rationale-toggle {
+  background: none;
+  border: none;
+  padding: 0;
+  font-size: 0.75rem;
+  color: #868686;
+  cursor: pointer;
+  text-align: left;
+  margin-top: 4px;
+}
+
+.variant-picker__rationale-toggle:hover {
+  color: #292929;
+}
+
+.variant-picker__rationale {
+  font-size: 0.8125rem;
+  color: #555;
+  line-height: 1.5;
+  margin: 4px 0 0;
+}
