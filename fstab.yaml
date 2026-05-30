@@ -1,0 +1,4 @@
+mountpoints:
+  /:
+    url: da://aemxsc/freehold
+    type: markup
