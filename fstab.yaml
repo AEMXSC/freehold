@@ -1,4 +1,4 @@
 mountpoints:
   /:
-    url: https://content.da.live/AEMXSC/freehold
+    url: https://content.da.live/aemxsc/freehold
     type: markup
